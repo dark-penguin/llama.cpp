@@ -228,6 +228,12 @@ extern "C" {
         LLAMA_CONTEXT_TYPE_MTP     = 1,
     };
 
+    enum llama_pipeline_parallelism {
+        LLAMA_PIPELINE_PARALLELISM_AUTO     = -1,
+        LLAMA_PIPELINE_PARALLELISM_DISABLED = 0,
+        LLAMA_PIPELINE_PARALLELISM_ENABLED  = 1,
+    };
+
     // the head on the block of a DFlash draft model
     enum llama_dflash_variant {
         LLAMA_DFLASH_VARIANT_NONE     = -1, // not a DFlash draft model
@@ -390,6 +396,7 @@ extern "C" {
         enum llama_pooling_type      pooling_type;      // whether to pool (sum) embedding results by sequence id
         enum llama_attention_type    attention_type;    // attention type to use for embeddings
         enum llama_flash_attn_type   flash_attn_type;   // when to enable Flash Attention
+        enum llama_pipeline_parallelism pp;             // force enable/disable pipeline parallelism
 
         // ref: https://github.com/ggml-org/llama.cpp/pull/2054
         float    rope_freq_base;   // RoPE base frequency, 0 = from model
