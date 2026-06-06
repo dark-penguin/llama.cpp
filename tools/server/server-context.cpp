@@ -716,7 +716,7 @@ struct server_slot {
 //
 
 static bool slot_checkpoints_save(const std::string & filepath,
-                                  const std::list<server_prompt_checkpoint> & checkpoints) {
+                                  const std::list<common_prompt_checkpoint> & checkpoints) {
     if (checkpoints.empty()) {
         return true;
     }
@@ -729,7 +729,7 @@ static bool slot_checkpoints_save(const std::string & filepath,
     }
 
     const uint32_t magic   = 0x4C4C4350;
-    const uint32_t version = 1;
+    const uint32_t version = 2;
     const uint32_t n_cp    = (uint32_t) checkpoints.size();
 
     bool ok = true;
@@ -738,13 +738,18 @@ static bool slot_checkpoints_save(const std::string & filepath,
     ok = ok && fwrite(&n_cp,    sizeof(n_cp),    1, fp) == 1;
 
     for (const auto & cp : checkpoints) {
-        const uint64_t data_size = cp.data.size();
-        ok = ok && fwrite(&cp.pos_min,  sizeof(cp.pos_min),  1, fp) == 1;
-        ok = ok && fwrite(&cp.pos_max,  sizeof(cp.pos_max),  1, fp) == 1;
-        ok = ok && fwrite(&cp.n_tokens, sizeof(cp.n_tokens), 1, fp) == 1;
-        ok = ok && fwrite(&data_size,   sizeof(data_size),   1, fp) == 1;
-        if (data_size > 0) {
-            ok = ok && fwrite(cp.data.data(), 1, data_size, fp) == data_size;
+        const uint64_t data_tgt_size = cp.data_tgt.size();
+        const uint64_t data_dft_size = cp.data_dft.size();
+        ok = ok && fwrite(&cp.pos_min,     sizeof(cp.pos_min),     1, fp) == 1;
+        ok = ok && fwrite(&cp.pos_max,     sizeof(cp.pos_max),     1, fp) == 1;
+        ok = ok && fwrite(&cp.n_tokens,    sizeof(cp.n_tokens),    1, fp) == 1;
+        ok = ok && fwrite(&data_tgt_size,  sizeof(data_tgt_size),  1, fp) == 1;
+        ok = ok && fwrite(&data_dft_size,  sizeof(data_dft_size),  1, fp) == 1;
+        if (data_tgt_size > 0) {
+            ok = ok && fwrite(cp.data_tgt.data(), 1, data_tgt_size, fp) == data_tgt_size;
+        }
+        if (data_dft_size > 0) {
+            ok = ok && fwrite(cp.data_dft.data(), 1, data_dft_size, fp) == data_dft_size;
         }
     }
 
@@ -761,7 +766,7 @@ static bool slot_checkpoints_save(const std::string & filepath,
 }
 
 static bool slot_checkpoints_load(const std::string & filepath,
-                                  std::list<server_prompt_checkpoint> & checkpoints) {
+                                  std::list<common_prompt_checkpoint> & checkpoints) {
     const std::string cp_path = filepath + ".checkpoints";
     FILE * fp = fopen(cp_path.c_str(), "rb");
     if (!fp) {
@@ -774,7 +779,7 @@ static bool slot_checkpoints_load(const std::string & filepath,
     ok = ok && fread(&version, sizeof(version), 1, fp) == 1;
     ok = ok && fread(&n_cp,    sizeof(n_cp),    1, fp) == 1;
 
-    if (!ok || magic != 0x4C4C4350 || version != 1) {
+    if (!ok || magic != 0x4C4C4350 || (version != 1 && version != 2)) {
         SRV_WRN("invalid checkpoint file header: %s\n", cp_path.c_str());
         fclose(fp);
         return false;
@@ -783,15 +788,36 @@ static bool slot_checkpoints_load(const std::string & filepath,
     checkpoints.clear();
 
     for (uint32_t i = 0; i < n_cp && ok; i++) {
-        server_prompt_checkpoint cp;
-        uint64_t data_size = 0;
-        ok = ok && fread(&cp.pos_min,  sizeof(cp.pos_min),  1, fp) == 1;
-        ok = ok && fread(&cp.pos_max,  sizeof(cp.pos_max),  1, fp) == 1;
-        ok = ok && fread(&cp.n_tokens, sizeof(cp.n_tokens), 1, fp) == 1;
-        ok = ok && fread(&data_size,   sizeof(data_size),   1, fp) == 1;
-        if (ok && data_size > 0) {
-            cp.data.resize(data_size);
-            ok = ok && fread(cp.data.data(), 1, data_size, fp) == data_size;
+        common_prompt_checkpoint cp;
+        cp.n_tokens = 0;
+        cp.pos_min = 0;
+        cp.pos_max = 0;
+        uint64_t data_tgt_size = 0;
+        uint64_t data_dft_size = 0;
+        ok = ok && fread(&cp.pos_min,     sizeof(cp.pos_min),     1, fp) == 1;
+        ok = ok && fread(&cp.pos_max,     sizeof(cp.pos_max),     1, fp) == 1;
+        ok = ok && fread(&cp.n_tokens,    sizeof(cp.n_tokens),    1, fp) == 1;
+
+        if (version == 1) {
+            // old format: single data blob - load into data_tgt for compatibility
+            uint64_t data_size = 0;
+            ok = ok && fread(&data_size, sizeof(data_size), 1, fp) == 1;
+            if (ok && data_size > 0) {
+                cp.data_tgt.resize(data_size);
+                ok = ok && fread(cp.data_tgt.data(), 1, data_size, fp) == data_size;
+            }
+        } else {
+            // version 2: separate tgt and dft data
+            ok = ok && fread(&data_tgt_size, sizeof(data_tgt_size), 1, fp) == 1;
+            ok = ok && fread(&data_dft_size, sizeof(data_dft_size), 1, fp) == 1;
+            if (ok && data_tgt_size > 0) {
+                cp.data_tgt.resize(data_tgt_size);
+                ok = ok && fread(cp.data_tgt.data(), 1, data_tgt_size, fp) == data_tgt_size;
+            }
+            if (ok && data_dft_size > 0) {
+                cp.data_dft.resize(data_dft_size);
+                ok = ok && fread(cp.data_dft.data(), 1, data_dft_size, fp) == data_dft_size;
+            }
         }
         if (ok) {
             checkpoints.push_back(std::move(cp));
@@ -4190,7 +4216,7 @@ void server_context::auto_save_slots() {
 
         const llama_tokens & tokens = slot.prompt.tokens.get_text_tokens();
         const size_t token_count    = slot.prompt.tokens.size();
-        const size_t nwrite = llama_state_seq_save_file(impl->ctx, filepath.c_str(), slot.id, tokens.data(), token_count);
+        const size_t nwrite = llama_state_seq_save_file(impl->ctx_tgt, filepath.c_str(), slot.id, tokens.data(), token_count);
 
         slot_checkpoints_save(filepath, slot.prompt.checkpoints);
 
@@ -4216,7 +4242,7 @@ void server_context::auto_restore_slots() {
         llama_tokens tokens;
         tokens.resize(slot.n_ctx);
         size_t token_count = 0;
-        const size_t nread = llama_state_seq_load_file(impl->ctx, filepath.c_str(), slot.id, tokens.data(), tokens.size(), &token_count);
+        const size_t nread = llama_state_seq_load_file(impl->ctx_tgt, filepath.c_str(), slot.id, tokens.data(), tokens.size(), &token_count);
 
         if (nread == 0) {
             SRV_WRN("auto-restore failed for slot %d from %s\n", slot.id, filepath.c_str());
