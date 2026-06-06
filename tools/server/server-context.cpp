@@ -199,6 +199,9 @@ struct server_slot {
 
     common_memory mem;
 
+    // context removal type for this slot
+    common_context_seq_rm_type ctx_seq_rm_type = COMMON_CONTEXT_SEQ_RM_TYPE_NO;
+
     // multimodal
     mtmd_context * mctx = nullptr;
     mtmd::batch_ptr mbatch = nullptr;
@@ -685,6 +688,7 @@ struct server_slot {
 
         other.prompt = prompt.clone();
         other.init_sampler();
+        other.ctx_seq_rm_type = ctx_seq_rm_type;
     }
 };
 
@@ -1327,6 +1331,7 @@ private:
         // initialize slots
         for (int i = 0; i < params_base.n_parallel; i++) {
             slots.emplace_back();
+            slots.back().ctx_seq_rm_type = ctx_tgt_seq_rm_type;
         }
 
         // try speculative decoding
@@ -3506,8 +3511,8 @@ private:
                     // - the model uses SWA (and we are not using `swa_full`)
                     // - the model supports partial sequence removal but only up to a fixed bound
                     do_checkpoint = do_checkpoint && (
-                            ctx_tgt_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_FULL ||
-                            ctx_tgt_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_RS ||
+                            slot.ctx_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_FULL ||
+                            slot.ctx_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_RS ||
                             n_swa > 0);
 
                     bool has_mtmd = false;
